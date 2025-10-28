@@ -368,5 +368,78 @@ router.get('/check-tx/:txHash', async (req, res) => {
   }
 });
 
+// @desc    Add internal credits to user (bonuses, promotions, adjustments)
+// @route   POST /api/monitor/internal-credits
+// @access  Private (add authentication in production)
+router.post('/internal-credits', async (req, res) => {
+  try {
+    const { phoneNumber, currency, amount, note } = req.body;
+    
+    if (!phoneNumber || !currency || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'phoneNumber, currency, and amount are required'
+      });
+    }
+
+    const User = require('../models/userModel');
+    const Transaction = require('../models/transactionModel');
+    
+    const user = await User.findOne({ phoneNumber });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const balanceEntry = user.balances.find(b => b.currency === currency);
+    if (!balanceEntry) {
+      return res.status(404).json({
+        success: false,
+        message: `Currency ${currency} not found for user`
+      });
+    }
+
+    // Agregar créditos internos
+    balanceEntry.internalCredits += amount;
+    balanceEntry.amount = balanceEntry.onChainBalance + balanceEntry.internalCredits;
+    await user.save();
+
+    // Registrar transacción
+    await Transaction.create({
+      user: user._id,
+      type: 'deposit',
+      currency: currency,
+      amount: amount,
+      status: 'completed',
+      metadata: {
+        source: 'internal_credits',
+        note: note || 'Internal credit added by admin',
+        addedAt: new Date()
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Internal credits added successfully',
+      data: {
+        user: user.name,
+        currency: currency,
+        creditsAdded: amount,
+        newInternalCredits: balanceEntry.internalCredits,
+        newOnChainBalance: balanceEntry.onChainBalance,
+        newTotalBalance: balanceEntry.amount
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add internal credits',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
 

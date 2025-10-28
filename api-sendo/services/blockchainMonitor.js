@@ -242,10 +242,11 @@ class ArbitrumMonitor {
         existingTx.metadata.processedAt = new Date();
         await existingTx.save();
 
-        // Actualizar balance
+        // Actualizar balance on-chain (no toca créditos internos)
         const balanceEntry = user.balances.find(b => b.currency === currency);
         if (balanceEntry) {
-          balanceEntry.amount += amount;
+          balanceEntry.onChainBalance += amount;
+          balanceEntry.amount = balanceEntry.onChainBalance + balanceEntry.internalCredits;
           await user.save();
           console.log(`✅ Deposit confirmed and credited to ${user.name}`);
         }
@@ -275,7 +276,8 @@ class ArbitrumMonitor {
     if (status === 'completed') {
       const balanceEntry = user.balances.find(b => b.currency === currency);
       if (balanceEntry) {
-        balanceEntry.amount += amount;
+        balanceEntry.onChainBalance += amount;
+        balanceEntry.amount = balanceEntry.onChainBalance + balanceEntry.internalCredits;
         await user.save();
         console.log(`✅ Deposit credited to ${user.name}`);
       }
@@ -350,33 +352,36 @@ class ArbitrumMonitor {
           let updated = false;
           
           const pyusdEntry = user.balances.find(b => b.currency === 'PYUSD-ARB');
-          if (pyusdEntry && pyusdEntry.amount !== pyusdAmount) {
-            // SAFETY: Only update if on-chain balance is HIGHER than DB
-            // This prevents overwriting if a deposit just came in
-            if (pyusdAmount > pyusdEntry.amount) {
-              console.log(`  ⚠️ On-chain PYUSD (${pyusdAmount}) > DB (${pyusdEntry.amount}) - likely missed deposit`);
-              pyusdEntry.amount = pyusdAmount;
+          if (pyusdEntry && pyusdEntry.onChainBalance !== pyusdAmount) {
+            // Actualiza SOLO el balance on-chain, NO toca créditos internos
+            if (pyusdAmount > pyusdEntry.onChainBalance) {
+              console.log(`  ⚠️ On-chain PYUSD (${pyusdAmount}) > DB (${pyusdEntry.onChainBalance}) - likely missed deposit`);
+              pyusdEntry.onChainBalance = pyusdAmount;
+              pyusdEntry.amount = pyusdEntry.onChainBalance + pyusdEntry.internalCredits;
               updated = true;
               userResult.pyusd.action = 'increased';
-            } else if (pyusdAmount < pyusdEntry.amount) {
-              console.log(`  ⚠️ On-chain PYUSD (${pyusdAmount}) < DB (${pyusdEntry.amount}) - likely a sweep occurred`);
-              pyusdEntry.amount = pyusdAmount;
+            } else if (pyusdAmount < pyusdEntry.onChainBalance) {
+              console.log(`  ⚠️ On-chain PYUSD (${pyusdAmount}) < DB (${pyusdEntry.onChainBalance}) - likely a sweep occurred`);
+              pyusdEntry.onChainBalance = pyusdAmount;
+              pyusdEntry.amount = pyusdEntry.onChainBalance + pyusdEntry.internalCredits;
               updated = true;
               userResult.pyusd.action = 'decreased';
             }
           }
           
           const usdtEntry = user.balances.find(b => b.currency === 'USDT-ARB');
-          if (usdtEntry && usdtEntry.amount !== usdtAmount) {
-            // SAFETY: Only update if on-chain balance is HIGHER than DB
-            if (usdtAmount > usdtEntry.amount) {
-              console.log(`  ⚠️ On-chain USDT (${usdtAmount}) > DB (${usdtEntry.amount}) - likely missed deposit`);
-              usdtEntry.amount = usdtAmount;
+          if (usdtEntry && usdtEntry.onChainBalance !== usdtAmount) {
+            // Actualiza SOLO el balance on-chain, NO toca créditos internos
+            if (usdtAmount > usdtEntry.onChainBalance) {
+              console.log(`  ⚠️ On-chain USDT (${usdtAmount}) > DB (${usdtEntry.onChainBalance}) - likely missed deposit`);
+              usdtEntry.onChainBalance = usdtAmount;
+              usdtEntry.amount = usdtEntry.onChainBalance + usdtEntry.internalCredits;
               updated = true;
               userResult.usdt.action = 'increased';
-            } else if (usdtAmount < usdtEntry.amount) {
-              console.log(`  ⚠️ On-chain USDT (${usdtAmount}) < DB (${usdtEntry.amount}) - likely a sweep occurred`);
-              usdtEntry.amount = usdtAmount;
+            } else if (usdtAmount < usdtEntry.onChainBalance) {
+              console.log(`  ⚠️ On-chain USDT (${usdtAmount}) < DB (${usdtEntry.onChainBalance}) - likely a sweep occurred`);
+              usdtEntry.onChainBalance = usdtAmount;
+              usdtEntry.amount = usdtEntry.onChainBalance + usdtEntry.internalCredits;
               updated = true;
               userResult.usdt.action = 'decreased';
             }
@@ -794,11 +799,12 @@ class SweepService {
       if (onChainAmount < 1) {
         console.log(`   ⚠️ Insufficient on-chain balance, skipping sweep`);
         
-        // Update DB balance to match on-chain reality to prevent infinite retries
+        // Update DB onChainBalance to match reality (keeps internalCredits intact)
         const balanceEntry = user.balances.find(b => b.currency === currency);
-        if (balanceEntry && balanceEntry.amount > 0) {
-          console.log(`   📝 Updating DB balance from ${balanceEntry.amount} to 0`);
-          balanceEntry.amount = 0;
+        if (balanceEntry && balanceEntry.onChainBalance > 0) {
+          console.log(`   📝 Updating on-chain balance from ${balanceEntry.onChainBalance} to 0`);
+          balanceEntry.onChainBalance = 0;
+          balanceEntry.amount = balanceEntry.onChainBalance + balanceEntry.internalCredits;
           await user.save();
         }
         

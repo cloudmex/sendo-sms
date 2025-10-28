@@ -12,6 +12,25 @@ const balanceSchema = new mongoose.Schema({
     default: 0,
     min: [0, 'Amount cannot be negative'],
   },
+  // Créditos internos (bonos, promociones, ajustes)
+  // El monitor NO toca estos valores
+  internalCredits: {
+    type: Number,
+    default: 0,
+    min: [0, 'Internal credits cannot be negative'],
+  },
+  // Balance on-chain (lo que realmente está en blockchain)
+  // El monitor SOLO actualiza este valor
+  onChainBalance: {
+    type: Number,
+    default: 0,
+    min: [0, 'On-chain balance cannot be negative'],
+  }
+});
+
+// Virtual para obtener el balance total
+balanceSchema.virtual('totalBalance').get(function() {
+  return this.onChainBalance + this.internalCredits;
 });
 
 const userSchema = new mongoose.Schema({
